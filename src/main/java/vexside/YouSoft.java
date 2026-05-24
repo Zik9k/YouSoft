@@ -3,13 +3,11 @@ package vexside;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.button.Button;
-import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.util.Hand;
 import net.minecraft.util.math.MathHelper;
-import net.minecraft.util.math.vector.Vector3d;
 import net.minecraft.util.text.StringTextComponent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
@@ -76,7 +74,7 @@ public class YouSoft {
             o.addProperty("speedMultiplier", speedMultiplier);
             o.addProperty("banMode", banMode);
             JsonObject b = new JsonObject();
-            for (var e : binds.entrySet()) b.addProperty(e.getKey(), e.getValue());
+            for (Map.Entry<String, Integer> e : binds.entrySet()) b.addProperty(e.getKey(), e.getValue());
             o.add("binds", b);
             try (Writer w = new FileWriter(FILE)) { GSON.toJson(o, w); } catch (Exception e) {}
         }
@@ -99,11 +97,12 @@ public class YouSoft {
         }
         if (target == null) return;
         
-        Vector3d tp = target.getPositionVec().add(0, target.getHeight()/2, 0);
-        Vector3d pp = mc.player.getEyePosition(1f);
-        Vector3d delta = tp.subtract(pp);
-        float yaw = (float)Math.toDegrees(Math.atan2(delta.z, delta.x)) - 90;
-        float pitch = (float)-Math.toDegrees(Math.atan2(delta.y, Math.hypot(delta.x, delta.z)));
+        double deltaX = target.getPosX() - mc.player.getPosX();
+        double deltaZ = target.getPosZ() - mc.player.getPosZ();
+        double deltaY = target.getPosY() + target.getHeight()/2 - (mc.player.getPosY() + mc.player.getEyeHeight());
+        
+        float yaw = (float) Math.toDegrees(Math.atan2(deltaZ, deltaX)) - 90;
+        float pitch = (float) -Math.toDegrees(Math.atan2(deltaY, Math.sqrt(deltaX*deltaX + deltaZ*deltaZ)));
         
         if (Config.killAuraMode.equals("FUNTIME")) {
             if (System.currentTimeMillis() - lastRot > 500) { rotYaw = (rotYaw + 45) % 360; lastRot = System.currentTimeMillis(); }
@@ -130,19 +129,16 @@ public class YouSoft {
             speedAngle += 0.8;
             double strafe = Math.sin(speedAngle) * 0.1;
             float yaw = mc.player.rotationYaw;
-            Vector3d f = Vector3d.fromPitchYaw(0, yaw);
-            Vector3d r = Vector3d.fromPitchYaw(0, yaw + 90);
-            double mx = f.x * base + r.x * strafe;
-            double mz = f.z * base + r.z * strafe;
-            if (mc.player.ticksExisted % 20 < 5) { mx *= 1.3; mz *= 1.3; }
-            mc.player.setMotion(mx, mc.player.getMotion().y, mz);
+            double motionX = -Math.sin(Math.toRadians(yaw)) * base + strafe;
+            double motionZ = Math.cos(Math.toRadians(yaw)) * base + strafe;
+            if (mc.player.ticksExisted % 20 < 5) { motionX *= 1.3; motionZ *= 1.3; }
+            mc.player.setMotion(motionX, mc.player.getMotion().y, motionZ);
         } else {
             float yaw = mc.player.rotationYaw;
-            Vector3d f = Vector3d.fromPitchYaw(0, yaw);
-            double mx = f.x * base;
-            double mz = f.z * base;
-            if (mc.player.isOnGround()) { mc.player.jump(); mx *= 1.4; mz *= 1.4; }
-            mc.player.setMotion(mx, mc.player.getMotion().y, mz);
+            double motionX = -Math.sin(Math.toRadians(yaw)) * base;
+            double motionZ = Math.cos(Math.toRadians(yaw)) * base;
+            if (mc.player.isOnGround()) { mc.player.jump(); motionX *= 1.4; motionZ *= 1.4; }
+            mc.player.setMotion(motionX, mc.player.getMotion().y, motionZ);
         }
     }
     
@@ -184,9 +180,9 @@ public class YouSoft {
         void refresh() { minecraft.displayGuiScreen(new YouSoftGUI()); }
         
         @Override
-        public void render(MatrixStack ms, int mx, int my, float pt) {
-            renderBackground(ms);
-            super.render(ms, mx, my, pt);
+        public void render(int mx, int my, float pt) {
+            this.renderBackground();
+            super.render(mx, my, pt);
         }
         
         @Override
@@ -207,7 +203,7 @@ public class YouSoft {
         }
         wasShift = shift;
         
-        for (var entry : Config.binds.entrySet()) {
+        for (Map.Entry<String, Integer> entry : Config.binds.entrySet()) {
             if (GLFW.glfwGetKey(mc.mainWindow.getHandle(), entry.getValue()) == GLFW.GLFW_PRESS) {
                 switch (entry.getKey()) {
                     case "KillAura": Config.killAuraEnabled = !Config.killAuraEnabled; Config.save(); break;
