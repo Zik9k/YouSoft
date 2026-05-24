@@ -3,6 +3,7 @@ package vexside;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.button.Button;
+import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerEntity;
@@ -57,7 +58,9 @@ public class YouSoft {
                 banMode = o.has("banMode") && o.get("banMode").getAsBoolean();
                 if (o.has("binds")) {
                     JsonObject b = o.getAsJsonObject("binds");
-                    for (String key : b.keySet()) binds.put(key, b.get(key).getAsInt());
+                    for (Map.Entry<String, JsonElement> entry : b.entrySet()) {
+                        binds.put(entry.getKey(), entry.getValue().getAsInt());
+                    }
                 }
             } catch (Exception e) {}
         }
@@ -73,7 +76,7 @@ public class YouSoft {
             o.addProperty("speedMultiplier", speedMultiplier);
             o.addProperty("banMode", banMode);
             JsonObject b = new JsonObject();
-            for (Map.Entry<String, Integer> e : binds.entrySet()) b.addProperty(e.getKey(), e.getValue());
+            for (var e : binds.entrySet()) b.addProperty(e.getKey(), e.getValue());
             o.add("binds", b);
             try (Writer w = new FileWriter(FILE)) { GSON.toJson(o, w); } catch (Exception e) {}
         }
@@ -81,7 +84,6 @@ public class YouSoft {
     
     private static long lastAttack = 0, lastRot = 0;
     private static float rotYaw = 0;
-    private static double speedAngle = 0;
     
     private static void onKillAura(Minecraft mc) {
         if (Config.banMode || !Config.killAuraEnabled) return;
@@ -89,15 +91,15 @@ public class YouSoft {
         
         Entity target = null;
         double best = Config.killAuraReach;
-        for (Entity e : mc.level.entitiesForRendering()) {
+        for (Entity e : mc.world.getAllEntities()) {
             if (!(e instanceof LivingEntity) || e == mc.player) continue;
             if (e instanceof PlayerEntity && ((PlayerEntity)e).isCreative()) continue;
-            double d = mc.player.distanceToSqr(e);
-            if (d < best * best) { best = Math.sqrt(d); target = e; }
+            double d = mc.player.getDistance(e);
+            if (d < best) { best = d; target = e; }
         }
         if (target == null) return;
         
-        Vector3d tp = target.position().add(0, target.getBbHeight()/2, 0);
+        Vector3d tp = target.getPositionVec().add(0, target.getHeight()/2, 0);
         Vector3d pp = mc.player.getEyePosition(1f);
         Vector3d delta = tp.subtract(pp);
         float yaw = (float)Math.toDegrees(Math.atan2(delta.z, delta.x)) - 90;
@@ -105,19 +107,21 @@ public class YouSoft {
         
         if (Config.killAuraMode.equals("FUNTIME")) {
             if (System.currentTimeMillis() - lastRot > 500) { rotYaw = (rotYaw + 45) % 360; lastRot = System.currentTimeMillis(); }
-            mc.player.yRot = yaw + (float)((Math.random()-0.5)*0.5) + rotYaw*0.1f;
-            mc.player.xRot = MathHelper.clamp(pitch + (float)((Math.random()-0.5)*0.3f), -90, 90);
+            mc.player.rotationYaw = yaw + (float)((Math.random()-0.5)*0.5) + rotYaw*0.1f;
+            mc.player.rotationPitch = MathHelper.clamp(pitch + (float)((Math.random()-0.5)*0.3f), -90, 90);
         } else {
-            mc.player.yRot = yaw;
-            mc.player.xRot = MathHelper.clamp(pitch, -90, 90);
+            mc.player.rotationYaw = yaw;
+            mc.player.rotationPitch = MathHelper.clamp(pitch, -90, 90);
         }
         
-        if (mc.player.distanceToSqr(target) <= Config.killAuraRange * Config.killAuraRange) {
-            mc.gameMode.attack(mc.player, target);
-            mc.player.swing(Hand.MAIN_HAND);
+        if (mc.player.getDistance(target) <= Config.killAuraRange) {
+            mc.playerController.attackEntity(mc.player, target);
+            mc.player.swingArm(Hand.MAIN_HAND);
             lastAttack = System.currentTimeMillis();
         }
     }
+    
+    private static double speedAngle = 0;
     
     private static void onSpeed(Minecraft mc) {
         if (Config.banMode || !Config.speedEnabled) return;
@@ -125,20 +129,20 @@ public class YouSoft {
         if (Config.speedMode.equals("FUNTIME")) {
             speedAngle += 0.8;
             double strafe = Math.sin(speedAngle) * 0.1;
-            float yaw = mc.player.yRot;
-            Vector3d f = Vector3d.directionFromRotation(0, yaw);
-            Vector3d r = Vector3d.directionFromRotation(0, yaw + 90);
+            float yaw = mc.player.rotationYaw;
+            Vector3d f = Vector3d.fromPitchYaw(0, yaw);
+            Vector3d r = Vector3d.fromPitchYaw(0, yaw + 90);
             double mx = f.x * base + r.x * strafe;
             double mz = f.z * base + r.z * strafe;
-            if (mc.player.tickCount % 20 < 5) { mx *= 1.3; mz *= 1.3; }
-            mc.player.setDeltaMovement(mx, mc.player.getDeltaMovement().y, mz);
+            if (mc.player.ticksExisted % 20 < 5) { mx *= 1.3; mz *= 1.3; }
+            mc.player.setMotion(mx, mc.player.getMotion().y, mz);
         } else {
-            float yaw = mc.player.yRot;
-            Vector3d f = Vector3d.directionFromRotation(0, yaw);
+            float yaw = mc.player.rotationYaw;
+            Vector3d f = Vector3d.fromPitchYaw(0, yaw);
             double mx = f.x * base;
             double mz = f.z * base;
-            if (mc.player.isOnGround()) { mc.player.jumpFromGround(); mx *= 1.4; mz *= 1.4; }
-            mc.player.setDeltaMovement(mx, mc.player.getDeltaMovement().y, mz);
+            if (mc.player.isOnGround()) { mc.player.jump(); mx *= 1.4; mz *= 1.4; }
+            mc.player.setMotion(mx, mc.player.getMotion().y, mz);
         }
     }
     
@@ -176,27 +180,35 @@ public class YouSoft {
             addButton(new Button(cx-100, y+205, 200, 20, new StringTextComponent("Закрыть"),
                 b -> { onClose(); }));
         }
-        void refresh() { minecraft.setScreen(new YouSoftGUI()); }
-        @Override public void render(MatrixStack ms, int mx, int my, float pt) { renderBackground(ms); super.render(ms, mx, my, pt); }
-        @Override public boolean isPauseScreen() { return false; }
+        
+        void refresh() { minecraft.displayGuiScreen(new YouSoftGUI()); }
+        
+        @Override
+        public void render(MatrixStack ms, int mx, int my, float pt) {
+            renderBackground(ms);
+            super.render(ms, mx, my, pt);
+        }
+        
+        @Override
+        public boolean isPauseScreen() { return false; }
     }
     
     private static boolean wasShift = false;
     
     @SubscribeEvent
-    public void onClientTick(TickEvent.ClientTickEvent e) {
+    public void onTick(TickEvent.ClientTickEvent e) {
         if (e.phase != TickEvent.Phase.END) return;
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) return;
         
-        boolean shift = mc.options.keyShift.isDown();
-        if (shift && !wasShift && GLFW.glfwGetKey(mc.getWindow().getWindow(), GLFW.GLFW_KEY_RIGHT_SHIFT) == GLFW.GLFW_PRESS) {
-            mc.setScreen(new YouSoftGUI());
+        boolean shift = mc.gameSettings.keyBindSneak.isKeyDown();
+        if (shift && !wasShift && GLFW.glfwGetKey(mc.mainWindow.getHandle(), GLFW.GLFW_KEY_RIGHT_SHIFT) == GLFW.GLFW_PRESS) {
+            mc.displayGuiScreen(new YouSoftGUI());
         }
         wasShift = shift;
         
-        for (Map.Entry<String, Integer> entry : Config.binds.entrySet()) {
-            if (GLFW.glfwGetKey(mc.getWindow().getWindow(), entry.getValue()) == GLFW.GLFW_PRESS) {
+        for (var entry : Config.binds.entrySet()) {
+            if (GLFW.glfwGetKey(mc.mainWindow.getHandle(), entry.getValue()) == GLFW.GLFW_PRESS) {
                 switch (entry.getKey()) {
                     case "KillAura": Config.killAuraEnabled = !Config.killAuraEnabled; Config.save(); break;
                     case "Speed": Config.speedEnabled = !Config.speedEnabled; Config.save(); break;
