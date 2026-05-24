@@ -1,10 +1,8 @@
-// YouSoft.java - ПОЛНЫЙ ЧИТ-КЛИЕНТ ДЛЯ FORGE 1.16.5
 package vexside;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.button.Button;
-import net.minecraft.client.settings.KeyBinding;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerEntity;
@@ -12,7 +10,6 @@ import net.minecraft.util.Hand;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.vector.Vector3d;
 import net.minecraft.util.text.StringTextComponent;
-import net.minecraftforge.client.event.InputEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -30,7 +27,6 @@ public class YouSoft {
         Config.load();
     }
     
-    // ==================== КОНФИГ ====================
     public static class Config {
         private static final File FILE = new File("config/yousoft.json");
         private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
@@ -45,7 +41,6 @@ public class YouSoft {
         public static float speedMultiplier = 1.5f;
         
         public static boolean banMode = false;
-        
         public static Map<String, Integer> binds = new HashMap<>();
         
         public static void load() {
@@ -78,33 +73,31 @@ public class YouSoft {
             o.addProperty("speedMultiplier", speedMultiplier);
             o.addProperty("banMode", banMode);
             JsonObject b = new JsonObject();
-            for (var e : binds.entrySet()) b.addProperty(e.getKey(), e.getValue());
+            for (Map.Entry<String, Integer> e : binds.entrySet()) b.addProperty(e.getKey(), e.getValue());
             o.add("binds", b);
             try (Writer w = new FileWriter(FILE)) { GSON.toJson(o, w); } catch (Exception e) {}
         }
     }
     
-    // ==================== KILL AURA ====================
     private static long lastAttack = 0, lastRot = 0;
     private static float rotYaw = 0;
+    private static double speedAngle = 0;
     
     private static void onKillAura(Minecraft mc) {
         if (Config.banMode || !Config.killAuraEnabled) return;
-
-if (System.currentTimeMillis() - lastAttack < 100) return;
+        if (System.currentTimeMillis() - lastAttack < 100) return;
         
         Entity target = null;
         double best = Config.killAuraReach;
-        for (Entity e : mc.world.getAllEntities()) {
+        for (Entity e : mc.level.entitiesForRendering()) {
             if (!(e instanceof LivingEntity) || e == mc.player) continue;
             if (e instanceof PlayerEntity && ((PlayerEntity)e).isCreative()) continue;
-            double d = mc.player.getDistance(e);
-            if (d < best) { best = d; target = e; }
+            double d = mc.player.distanceToSqr(e);
+            if (d < best * best) { best = Math.sqrt(d); target = e; }
         }
         if (target == null) return;
         
-        // Ротация
-        Vector3d tp = target.getPositionVec().add(0, target.getHeight()/2, 0);
+        Vector3d tp = target.position().add(0, target.getBbHeight()/2, 0);
         Vector3d pp = mc.player.getEyePosition(1f);
         Vector3d delta = tp.subtract(pp);
         float yaw = (float)Math.toDegrees(Math.atan2(delta.z, delta.x)) - 90;
@@ -112,22 +105,19 @@ if (System.currentTimeMillis() - lastAttack < 100) return;
         
         if (Config.killAuraMode.equals("FUNTIME")) {
             if (System.currentTimeMillis() - lastRot > 500) { rotYaw = (rotYaw + 45) % 360; lastRot = System.currentTimeMillis(); }
-            mc.player.rotationYaw = yaw + (float)((Math.random()-0.5)*0.5) + rotYaw*0.1f;
-            mc.player.rotationPitch = MathHelper.clamp(pitch + (float)((Math.random()-0.5)*0.3f), -90, 90);
+            mc.player.yRot = yaw + (float)((Math.random()-0.5)*0.5) + rotYaw*0.1f;
+            mc.player.xRot = MathHelper.clamp(pitch + (float)((Math.random()-0.5)*0.3f), -90, 90);
         } else {
-            mc.player.rotationYaw = yaw;
-            mc.player.rotationPitch = MathHelper.clamp(pitch, -90, 90);
+            mc.player.yRot = yaw;
+            mc.player.xRot = MathHelper.clamp(pitch, -90, 90);
         }
         
-        if (mc.player.getDistance(target) <= Config.killAuraRange) {
-            mc.playerController.attackEntity(mc.player, target);
-            mc.player.swingArm(Hand.MAIN_HAND);
+        if (mc.player.distanceToSqr(target) <= Config.killAuraRange * Config.killAuraRange) {
+            mc.gameMode.attack(mc.player, target);
+            mc.player.swing(Hand.MAIN_HAND);
             lastAttack = System.currentTimeMillis();
         }
     }
-    
-    // ==================== SPEED ====================
-    private static double speedAngle = 0;
     
     private static void onSpeed(Minecraft mc) {
         if (Config.banMode || !Config.speedEnabled) return;
@@ -135,24 +125,23 @@ if (System.currentTimeMillis() - lastAttack < 100) return;
         if (Config.speedMode.equals("FUNTIME")) {
             speedAngle += 0.8;
             double strafe = Math.sin(speedAngle) * 0.1;
-            float yaw = mc.player.rotationYaw;
-            Vector3d f = Vector3d.fromPitchYaw(0, yaw);
-            Vector3d r = Vector3d.fromPitchYaw(0, yaw + 90);
+            float yaw = mc.player.yRot;
+            Vector3d f = Vector3d.directionFromRotation(0, yaw);
+            Vector3d r = Vector3d.directionFromRotation(0, yaw + 90);
             double mx = f.x * base + r.x * strafe;
             double mz = f.z * base + r.z * strafe;
-            if (mc.player.ticksExisted % 20 < 5) { mx *= 1.3; mz *= 1.3; }
-            mc.player.setMotion(mx, mc.player.getMotion().y, mz);
+            if (mc.player.tickCount % 20 < 5) { mx *= 1.3; mz *= 1.3; }
+            mc.player.setDeltaMovement(mx, mc.player.getDeltaMovement().y, mz);
         } else {
-            float yaw = mc.player.rotationYaw;
-            Vector3d f = Vector3d.fromPitchYaw(0, yaw);
+            float yaw = mc.player.yRot;
+            Vector3d f = Vector3d.directionFromRotation(0, yaw);
             double mx = f.x * base;
             double mz = f.z * base;
-            if (mc.player.isOnGround()) { mc.player.jump(); mx *= 1.4; mz *= 1.4; }
-            mc.player.setMotion(mx, mc.player.getMotion().y, mz);
+            if (mc.player.isOnGround()) { mc.player.jumpFromGround(); mx *= 1.4; mz *= 1.4; }
+            mc.player.setDeltaMovement(mx, mc.player.getDeltaMovement().y, mz);
         }
     }
     
-    // ==================== МЕНЮ ====================
     public static class YouSoftGUI extends Screen {
         public YouSoftGUI() { super(new StringTextComponent("YouSoft")); }
         
@@ -167,8 +156,7 @@ if (System.currentTimeMillis() - lastAttack < 100) return;
                 b -> { Config.killAuraMode = Config.killAuraMode.equals("FUNTIME") ? "HVH" : "FUNTIME"; Config.save(); refresh(); }));
             addButton(new Button(cx-100, y+50, 95, 20, new StringTextComponent("Атака: " + Config.killAuraRange),
                 b -> { Config.killAuraRange = Config.killAuraRange >= 6.9f ? 3f : Config.killAuraRange + 0.5f; Config.save(); refresh(); }));
-
-addButton(new Button(cx+5, y+50, 95, 20, new StringTextComponent("Наводка: " + Config.killAuraReach),
+            addButton(new Button(cx+5, y+50, 95, 20, new StringTextComponent("Наводка: " + Config.killAuraReach),
                 b -> { Config.killAuraReach = Config.killAuraReach >= 6.9f ? 3f : Config.killAuraReach + 0.5f; Config.save(); refresh(); }));
             
             addButton(new Button(cx-100, y+85, 200, 20, new StringTextComponent(
@@ -188,30 +176,27 @@ addButton(new Button(cx+5, y+50, 95, 20, new StringTextComponent("Наводка
             addButton(new Button(cx-100, y+205, 200, 20, new StringTextComponent("Закрыть"),
                 b -> { onClose(); }));
         }
-        void refresh() { minecraft.displayGuiScreen(new YouSoftGUI()); }
-        @Override public void render(int mx, int my, float pt) { renderBackground(); super.render(mx, my, pt); }
+        void refresh() { minecraft.setScreen(new YouSoftGUI()); }
+        @Override public void render(MatrixStack ms, int mx, int my, float pt) { renderBackground(ms); super.render(ms, mx, my, pt); }
         @Override public boolean isPauseScreen() { return false; }
     }
     
-    // ==================== ТИКИ И БИНДЫ ====================
     private static boolean wasShift = false;
     
     @SubscribeEvent
-    public void onTick(TickEvent.ClientTickEvent e) {
+    public void onClientTick(TickEvent.ClientTickEvent e) {
         if (e.phase != TickEvent.Phase.END) return;
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) return;
         
-        // Открытие меню на правый Shift
-        boolean shift = mc.gameSettings.keyBindSneak.isKeyDown();
-        if (shift && !wasShift && GLFW.glfwGetKey(mc.mainWindow.getHandle(), GLFW.GLFW_KEY_RIGHT_SHIFT) == GLFW.GLFW_PRESS) {
-            mc.displayGuiScreen(new YouSoftGUI());
+        boolean shift = mc.options.keyShift.isDown();
+        if (shift && !wasShift && GLFW.glfwGetKey(mc.getWindow().getWindow(), GLFW.GLFW_KEY_RIGHT_SHIFT) == GLFW.GLFW_PRESS) {
+            mc.setScreen(new YouSoftGUI());
         }
         wasShift = shift;
         
-        // Бинды
-        for (var entry : Config.binds.entrySet()) {
-            if (GLFW.glfwGetKey(mc.mainWindow.getHandle(), entry.getValue()) == GLFW.GLFW_PRESS) {
+        for (Map.Entry<String, Integer> entry : Config.binds.entrySet()) {
+            if (GLFW.glfwGetKey(mc.getWindow().getWindow(), entry.getValue()) == GLFW.GLFW_PRESS) {
                 switch (entry.getKey()) {
                     case "KillAura": Config.killAuraEnabled = !Config.killAuraEnabled; Config.save(); break;
                     case "Speed": Config.speedEnabled = !Config.speedEnabled; Config.save(); break;
